@@ -1,0 +1,11 @@
+{
+  "builds": [
+    { "src": "app_eventos.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "app_eventos.py" }
+  ],
+  "crons": [
+    { "path": "/api/cron/update-events", "schedule": "0 4,15 * * *" }
+  ]
+}

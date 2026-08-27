@@ -1,0 +1,37 @@
+# Banco de dados local (nunca subir pro GitHub — dados reais de colaboradores/inscrições)
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Evidências enviadas localmente (em produção ficam no Vercel Blob, não no disco)
+uploads/
+
+# Templates gerados automaticamente pelo app (recriados a cada execução local)
+templates/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Variáveis de ambiente e segredos (SECRET_KEY, TURSO_AUTH_TOKEN, etc.)
+.env
+.env.local
+.env*.local
+
+# Vercel
+.vercel/
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
