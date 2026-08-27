@@ -2687,4 +2687,4 @@ if __name__ == '__main__':
         print("⏰ Agendador iniciado (01:00 e 12:00) — só roda localmente, na Vercel isso é um Cron Job")
 
     if not IS_VERCEL:
-        app.run(debug=True, host='0.0.0.0', port=8080)
+        app.run(debug=True, host='0.0.0.0', port=8080) 
