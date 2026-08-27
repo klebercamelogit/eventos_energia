@@ -523,6 +523,9 @@ def update_events():
     manualmente (source='manual') nunca são tocados por essa função.
     Se a busca falhar, os dados existentes são preservados (nada é apagado).
     """
+    with app.app_context():
+        _deduplicar_eventos_auto()
+
     print(f"🔄 Buscando eventos reais em {datetime.now()}")
     try:
         eventos = fetch_events_from_web()
@@ -532,7 +535,6 @@ def update_events():
         return {'ok': False, 'error': str(e)}
 
     with app.app_context():
-        _deduplicar_eventos_auto()
         vistos_agora = set()
 
         for ev_data in eventos:
@@ -1559,6 +1561,20 @@ def manual_update():
     return redirect(request.referrer or url_for('events'))
 
 
+@app.route('/events/limpar-duplicatas', methods=['POST'])
+@login_required
+@admin_required
+def limpar_duplicatas():
+    """Roda só a limpeza de duplicatas, sem depender da busca de eventos na web funcionar."""
+    with app.app_context():
+        removidos = _deduplicar_eventos_auto()
+    if removidos:
+        flash(f"🧹 {removidos} evento(s) duplicado(s) mesclado(s) com sucesso.", 'success')
+    else:
+        flash("✅ Nenhuma duplicata encontrada.", 'success')
+    return redirect(request.referrer or url_for('events'))
+
+
 # ============================================================
 # ROTAS - INSCRIÇÃO DE COLABORADOR EM PALESTRA
 # ============================================================
@@ -1776,6 +1792,10 @@ def create_templates():
             .table th, .table td { padding:6px 6px; font-size:11px; }
             .card-header h2 { font-size:12px; }
             .btn { font-size:11px; padding:6px 10px; }
+            .dashboard-grid { grid-template-columns:1fr !important; max-width:100% !important; }
+            .card-header { flex-direction:column; align-items:stretch !important; }
+            .card-header form { width:100%; }
+            .card-header form select, .card-header form input { max-width:100%; flex:1 1 auto; min-width:0; }
         }
         @media (max-width:480px) {
             .container { padding:0 8px; }
@@ -1788,7 +1808,8 @@ def create_templates():
             .card-body { padding:8px; }
             .table th, .table td { padding:4px 4px; font-size:10px; }
             .link-copy a { font-size:10px; }
-            .link-copy .url-text { font-size:8px; }
+            .link-copy .url-text { font-size:8px; word-break:break-all; display:block; max-width:100%; }
+            .card-header form select, .card-header form input { font-size:11px; padding:4px 6px; }
         }
     </style>
 </head>
@@ -1962,7 +1983,7 @@ def create_templates():
 </div>
 </div>
 
-<div style="max-width:950px; margin:0 auto; display:grid; grid-template-columns:300px 1fr; gap:16px; align-items:start;">
+<div class="dashboard-grid" style="max-width:950px; margin:0 auto; display:grid; grid-template-columns:300px 1fr; gap:16px; align-items:start;">
 
 <!-- Calendário -->
 <div class="card">
@@ -2371,6 +2392,9 @@ def create_templates():
     <div class="flex gap-8">
         <form method="post" action="{{ url_for('manual_update') }}" style="display:inline;">
             <button type="submit" class="btn btn-warning">🔄 Atualizar Eventos</button>
+        </form>
+        <form method="post" action="{{ url_for('limpar_duplicatas') }}" style="display:inline;">
+            <button type="submit" class="btn btn-secondary" onclick="return confirm('Mesclar eventos duplicados (mesmo título e data)?');">🧹 Limpar Duplicatas</button>
         </form>
         <a href="{{ url_for('event_add') }}" class="btn btn-success">+ Novo Evento</a>
     </div>
