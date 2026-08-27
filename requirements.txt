@@ -6,3 +6,5 @@ requests
 beautifulsoup4
 sqlalchemy-libsql
 vercel_blob
+openpyxl
+reportlab

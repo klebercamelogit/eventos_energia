@@ -3,7 +3,7 @@ import uuid
 import sqlite3
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_from_directory, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
@@ -397,6 +397,9 @@ def _uf_por_cidade(location):
     return CIDADE_PARA_UF.get(chave)
 
 
+app.jinja_env.globals['uf_por_cidade'] = _uf_por_cidade
+
+
 def _extrair_cidade_pais(texto_bruto, titulo):
     """
     A listagem traz tudo junto no texto do link: "DD/MM/AAAA a DD/MM/AAAA Título Cidade, País".
@@ -474,6 +477,45 @@ def fetch_events_from_web():
 # ============================================================
 # ATUALIZAÇÃO DOS EVENTOS (busca real, preserva eventos manuais)
 # ============================================================
+def _deduplicar_eventos_auto():
+    """
+    Mescla eventos automáticos duplicados (mesmo título normalizado) que ficaram
+    no banco — provavelmente de execuções antigas do scraper, antes da correção
+    da paginação. Mantém o mais antigo, move palestras/inscrições dele pros
+    outros antes de apagar os duplicados, pra não perder nenhuma inscrição.
+    """
+    todos = Event.query.filter_by(source='auto').order_by(Event.id.asc()).all()
+    grupos = {}
+    for e in todos:
+        chave = (_normalize_title(e.title), e.date)
+        grupos.setdefault(chave, []).append(e)
+
+    removidos = 0
+    for chave, eventos_grupo in grupos.items():
+        if len(eventos_grupo) <= 1:
+            continue
+        principal = eventos_grupo[0]  # o de menor id (mais antigo)
+        duplicados = eventos_grupo[1:]
+        for dup in duplicados:
+            # Move palestras do duplicado pro evento principal, em vez de apagar
+            for t in Talk.query.filter_by(event_id=dup.id).all():
+                t.event_id = principal.id
+            # Move inscrições de evento (com hotel) também
+            for r in Registration.query.filter_by(event_id=dup.id).all():
+                ja_existe = Registration.query.filter_by(event_id=principal.id, user_id=r.user_id).first()
+                if ja_existe:
+                    db.session.delete(r)  # já tem essa pessoa no principal, evita duplicar
+                else:
+                    r.event_id = principal.id
+            db.session.delete(dup)
+            removidos += 1
+
+    if removidos:
+        db.session.commit()
+        print(f"🧹 {removidos} evento(s) duplicado(s) mesclado(s) no evento principal.")
+    return removidos
+
+
 def update_events():
     """
     Busca eventos reais via scraping e sincroniza com o banco.
@@ -490,6 +532,7 @@ def update_events():
         return {'ok': False, 'error': str(e)}
 
     with app.app_context():
+        _deduplicar_eventos_auto()
         vistos_agora = set()
 
         for ev_data in eventos:
@@ -788,7 +831,7 @@ def dashboard():
 
     total_registrations = Registration.query.count()
 
-    next_upcoming = [e for e in all_events if e.date > today]
+    next_upcoming = [e for e in all_events if e.date > today and (e.country or '').strip().lower() == 'brasil']
     next_event = next_upcoming[0] if next_upcoming else None
     days_until_next = next_event.days_until() if next_event else None
 
@@ -1266,6 +1309,150 @@ def talk_evidence_delete(reg_id):
     return redirect(url_for('registrations'))
 
 
+# ============================================================
+# RELATÓRIO DE INSCRITOS POR EVENTO (com filtros e exportação)
+# ============================================================
+def _filtrar_inscritos_evento():
+    """Aplica os filtros da querystring sobre Registration e retorna a lista + opções dos combos."""
+    f_evento = request.args.get('r_evento', '').strip()
+    f_nome = request.args.get('r_nome', '').strip()
+    f_mes = request.args.get('r_mes', '').strip()
+    f_ano = request.args.get('r_ano', '').strip()
+    f_uf = request.args.get('r_uf', '').strip()
+    f_pais = request.args.get('r_pais', '').strip()
+
+    todas = Registration.query.join(Event).order_by(Event.date.desc()).all()
+
+    opcoes_evento = sorted({r.event.title for r in todas}, key=_normalize_title)
+    opcoes_nome = sorted({r.user.name for r in todas}, key=_normalize_title)
+    opcoes_pais = sorted({r.event.country for r in todas if r.event.country})
+    opcoes_uf = sorted({_uf_por_cidade(r.event.location) for r in todas if _uf_por_cidade(r.event.location)})
+
+    regs = todas
+    if f_evento:
+        regs = [r for r in regs if r.event.title == f_evento]
+    if f_nome:
+        regs = [r for r in regs if r.user.name == f_nome]
+    if f_mes:
+        regs = [r for r in regs if r.event.date.month == int(f_mes)]
+    if f_ano:
+        regs = [r for r in regs if r.event.date.year == int(f_ano)]
+    if f_uf:
+        regs = [r for r in regs if _uf_por_cidade(r.event.location) == f_uf]
+    if f_pais:
+        regs = [r for r in regs if r.event.country == f_pais]
+
+    filtros = {
+        'r_evento': f_evento, 'r_nome': f_nome, 'r_mes': f_mes,
+        'r_ano': f_ano, 'r_uf': f_uf, 'r_pais': f_pais
+    }
+    opcoes = {
+        'opcoes_evento': opcoes_evento, 'opcoes_nome': opcoes_nome,
+        'opcoes_pais': opcoes_pais, 'opcoes_uf': opcoes_uf
+    }
+    return regs, filtros, opcoes
+
+
+@app.route('/relatorio/inscritos')
+@login_required
+def relatorio_inscritos():
+    regs, filtros, opcoes = _filtrar_inscritos_evento()
+    anos_disponiveis = sorted({r.event.date.year for r in Registration.query.join(Event).all()}, reverse=True)
+    return render_template('relatorio_inscritos.html', registros=regs, anos_disponiveis=anos_disponiveis, **filtros, **opcoes)
+
+
+@app.route('/relatorio/inscritos/xlsx')
+@login_required
+def relatorio_inscritos_xlsx():
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    import io
+
+    regs, _, _ = _filtrar_inscritos_evento()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Inscritos"
+    cabecalho = ['Colaborador', 'Departamento', 'Evento', 'Data do Evento', 'Local', 'Estado', 'País', 'Hotel', 'Data da Inscrição']
+    ws.append(cabecalho)
+    for cel in ws[1]:
+        cel.font = Font(bold=True)
+
+    for r in regs:
+        uf = _uf_por_cidade(r.event.location) or ''
+        ws.append([
+            r.user.name,
+            r.user.department or '',
+            r.event.title,
+            r.event.date.strftime('%d/%m/%Y'),
+            r.event.location or '',
+            uf,
+            r.event.country or '',
+            r.hotel_name or '',
+            r.registration_date.strftime('%d/%m/%Y %H:%M') if r.registration_date else ''
+        ])
+
+    for col in ws.columns:
+        largura = max(len(str(c.value)) if c.value else 0 for c in col) + 2
+        ws.column_dimensions[col[0].column_letter].width = min(largura, 40)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"inscritos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+@app.route('/relatorio/inscritos/pdf')
+@login_required
+def relatorio_inscritos_pdf():
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import landscape, A4
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    import io
+
+    regs, _, _ = _filtrar_inscritos_evento()
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), topMargin=1.2*cm, bottomMargin=1.2*cm)
+    styles = getSampleStyleSheet()
+
+    elementos = [Paragraph("Relatório de Inscritos em Eventos — Energisa", styles['Title'])]
+
+    dados = [['Colaborador', 'Depto', 'Evento', 'Data', 'Local', 'UF', 'País', 'Hotel']]
+    for r in regs:
+        uf = _uf_por_cidade(r.event.location) or ''
+        dados.append([
+            r.user.name, r.user.department or '', r.event.title,
+            r.event.date.strftime('%d/%m/%Y'), r.event.location or '',
+            uf, r.event.country or '', r.hotel_name or ''
+        ])
+
+    tabela = Table(dados, repeatRows=1)
+    tabela.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0077B6')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f2f2f2')]),
+    ]))
+    elementos.append(tabela)
+    doc.build(elementos)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"inscritos_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+        mimetype='application/pdf'
+    )
+
+
 @app.route('/registration/add', methods=['GET', 'POST'])
 @login_required
 def registration_add():
@@ -1629,6 +1816,7 @@ def create_templates():
                     <a href="{{ url_for('events') }}">Eventos</a>
                     {% endif %}
                     <a href="{{ url_for('registrations') }}">Inscrições</a>
+                    <a href="{{ url_for('relatorio_inscritos') }}">Relatório</a>
                     <a href="{{ url_for('logout') }}" style="color:var(--vermelho);">Sair</a>
                 </div>
                 {% endif %}
@@ -1844,6 +2032,12 @@ def create_templates():
             {% for ev in day.events %}
                 <div style="margin-bottom:10px;">
                     <strong style="color:var(--blue); font-size:13px;">{{ ev.title }}</strong>
+                    <div style="font-size:11px; color:var(--text-3); margin-bottom:4px;">
+                        📅 {{ ev.date.strftime('%d/%m/%Y') }}
+                        {% set uf = uf_por_cidade(ev.location) %}
+                        {% if ev.location %} · 📍 {{ ev.location }}{% if uf %} ({{ uf }}){% endif %}{% endif %}
+                        {% if ev.country %} · {{ ev.country }}{% endif %}
+                    </div>
                     <ul style="list-style:none; margin:4px 0 0 0; padding:0; font-size:12px;">
                         {% for reg in ev.registrations %}
                             <li style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
@@ -2030,14 +2224,17 @@ def create_templates():
                                         </div>
 
                                         {% if register_talk == talk.id %}
-                                            <form method="post" action="{{ url_for('register_talk', talk_id=talk.id) }}" style="margin-top:6px; display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+                                            <form id="form-inscrever-{{ talk.id }}" method="post" action="{{ url_for('register_talk', talk_id=talk.id) }}" style="margin-top:6px; display:flex; gap:4px; align-items:center; flex-wrap:wrap; padding:8px; background:#fff3cd; border:2px solid #f77f00; border-radius:6px;">
                                                 <input type="hidden" name="list_year" value="{{ list_year }}">
                                                 <input type="hidden" name="list_month" value="{{ list_month }}">
                                                 <input type="hidden" name="list_country" value="{{ list_country }}">
                                                 <input type="hidden" name="list_has_reg" value="{{ list_has_reg }}">
-                                                <span style="font-size:11px; color:var(--text-3);">Confirmar sua inscrição nessa palestra?</span>
-                                                <button type="submit" class="btn btn-primary btn-sm" style="padding:3px 10px; font-size:11px;">Inscrever-me</button>
+                                                <span style="font-size:11px; color:#663c00; font-weight:600;">Confirmar sua inscrição nessa palestra?</span>
+                                                <button type="submit" class="btn btn-primary btn-sm" style="padding:3px 10px; font-size:11px;">✅ Inscrever-me</button>
                                             </form>
+                                            <script>
+                                                document.getElementById('form-inscrever-{{ talk.id }}').scrollIntoView({behavior: 'smooth', block: 'center'});
+                                            </script>
                                         {% endif %}
 
                                         {% if view_talk == talk.id %}
@@ -2497,6 +2694,111 @@ def create_templates():
                     </tr>
                     {% else %}
                     <tr><td colspan="6" class="text-center">Nenhuma inscrição em palestras encontrada.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}''',
+
+        'relatorio_inscritos.html': '''{% extends "base.html" %}
+{% block title %}Relatório de Inscritos{% endblock %}
+{% block page_title %}Relatório de Inscritos por Evento{% endblock %}
+{% block page_sub %}Filtre e exporte a lista{% endblock %}
+{% block content %}
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h2>Filtros</h2></div>
+    <div class="card-body">
+        <form method="get" action="{{ url_for('relatorio_inscritos') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:11px;">Evento</label>
+                <select name="r_evento" class="form-control" style="font-size:12px;">
+                    <option value="">Todos</option>
+                    {% for e in opcoes_evento %}
+                        <option value="{{ e }}" {% if r_evento == e %}selected{% endif %}>{{ e }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:11px;">Participante</label>
+                <select name="r_nome" class="form-control" style="font-size:12px;">
+                    <option value="">Todos</option>
+                    {% for n in opcoes_nome %}
+                        <option value="{{ n }}" {% if r_nome == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:11px;">Mês</label>
+                <select name="r_mes" class="form-control" style="font-size:12px;">
+                    <option value="">Todos</option>
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if r_mes == m|string %}selected{% endif %}>{{ "%02d"|format(m) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:11px;">Ano</label>
+                <select name="r_ano" class="form-control" style="font-size:12px;">
+                    <option value="">Todos</option>
+                    {% for a in anos_disponiveis %}
+                        <option value="{{ a }}" {% if r_ano == a|string %}selected{% endif %}>{{ a }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:11px;">Estado</label>
+                <select name="r_uf" class="form-control" style="font-size:12px;">
+                    <option value="">Todos</option>
+                    {% for uf in opcoes_uf %}
+                        <option value="{{ uf }}" {% if r_uf == uf %}selected{% endif %}>{{ uf }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:11px;">País</label>
+                <select name="r_pais" class="form-control" style="font-size:12px;">
+                    <option value="">Todos</option>
+                    {% for p in opcoes_pais %}
+                        <option value="{{ p }}" {% if r_pais == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+            {% if r_evento or r_nome or r_mes or r_ano or r_uf or r_pais %}
+                <a href="{{ url_for('relatorio_inscritos') }}" class="btn btn-secondary btn-sm">Limpar</a>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header" style="flex-wrap:wrap; gap:8px;">
+        <h2>Inscritos ({{ registros|length }})</h2>
+        <div class="flex gap-8">
+            <a href="{{ url_for('relatorio_inscritos_xlsx', **request.args) }}" class="btn btn-secondary btn-sm">⬇️ XLSX</a>
+            <a href="{{ url_for('relatorio_inscritos_pdf', **request.args) }}" class="btn btn-secondary btn-sm">⬇️ PDF</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper">
+            <table class="table">
+                <thead><tr><th>Colaborador</th><th>Departamento</th><th>Evento</th><th>Data</th><th>Local</th><th>Estado</th><th>País</th><th>Hotel</th></tr></thead>
+                <tbody>
+                    {% for r in registros %}
+                    <tr>
+                        <td>{{ r.user.name }}</td>
+                        <td>{{ r.user.department }}</td>
+                        <td>{{ r.event.title }}</td>
+                        <td>{{ r.event.date.strftime('%d/%m/%Y') }}</td>
+                        <td>{{ r.event.location or '-' }}</td>
+                        <td>{{ uf_por_cidade(r.event.location) or '-' }}</td>
+                        <td>{{ r.event.country or '-' }}</td>
+                        <td>{{ r.hotel_name or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8" class="text-center">Nenhum inscrito encontrado para esse filtro.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
