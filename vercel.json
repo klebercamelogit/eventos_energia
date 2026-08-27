@@ -6,6 +6,6 @@
     { "src": "/(.*)", "dest": "app_eventos.py" }
   ],
   "crons": [
-    { "path": "/api/cron/update-events", "schedule": "0 4,15 * * *" }
+    { "path": "/api/cron/update-events", "schedule": "0 4 * * *" }
   ]
 }
