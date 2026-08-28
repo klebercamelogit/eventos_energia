@@ -2292,7 +2292,7 @@ def create_templates():
                             {% endif %}
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">📋</span>
-                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento</a>
+                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento ({{ ev.talks|length }})</a>
                             </div>
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">🧳</span>
@@ -2325,6 +2325,12 @@ def create_templates():
                         </div>
                         <!-- Exibe palestras se for o evento selecionado -->
                         {% if selected_event_id == ev.id %}
+                            {% if ev.description %}
+                                <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
+                                    <strong style="font-size:12px; color:var(--blue);">📄 Resumo do evento</strong>
+                                    <p style="font-size:12px; color:var(--text-2); margin:4px 0 0 0;">{{ ev.description }}</p>
+                                </div>
+                            {% endif %}
                             <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
                                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                                     <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
