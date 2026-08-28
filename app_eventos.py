@@ -2288,7 +2288,7 @@ def create_templates():
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">🧳</span>
                                 <a href="{{ url_for('event_register_self', event_id=ev.id) }}" style="font-size:11px;">Inscrever-me neste evento</a>
-                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id, view_event=(None if view_event == ev.id else ev.id)) }}"
+                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, view_event=(None if view_event == ev.id else ev.id)) }}"
                                    style="font-size:11px; margin-left:4px;" title="Ver quem está inscrito">👁️ ({{ ev.registrations|length }})</a>
                             </div>
                             {% if view_event == ev.id %}
