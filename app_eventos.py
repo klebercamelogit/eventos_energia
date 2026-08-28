@@ -1885,8 +1885,11 @@ def create_templates():
         @media (max-width:480px) {
             .container { padding:0 8px; }
             .site-header-inner { flex-direction:column; align-items:stretch; gap:4px; }
-            .site-header-top { justify-content:center; flex-wrap:wrap; gap:8px; }
-            .pg-info { text-align:left; }
+            .site-header-top { justify-content:flex-start; position:relative; min-height:36px; }
+            .pg-info {
+                position:absolute; left:50%; top:50%; transform:translate(-50%, -50%);
+                text-align:center; max-width:52%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+            }
             .header-actions { justify-content:center; flex-wrap:wrap; }
             .today-pill { display:none; }
             .nav-links { justify-content:center; }
