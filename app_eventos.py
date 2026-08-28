@@ -2251,15 +2251,16 @@ def create_templates():
                         <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="display:block; text-decoration:none; color:var(--text);">
                             <strong style="font-size:13px;">{{ ev.title }}</strong><br>
                             <span style="font-size:11px; color:var(--text-2);">
-                                {{ ev.date.strftime('%d/%m/%Y') }} {% if ev.time %} - {{ ev.time }}{% endif %}
+                                📅 {{ ev.date.strftime('%d/%m/%Y') }}{% if ev.time %} - {{ ev.time }}{% endif %}
+                                {% set uf = uf_por_cidade(ev.location) %}
+                                {% if ev.location and ev.country %}
+                                    · 📍 {{ ev.location }}{% if uf %} ({{ uf }}){% endif %}, {{ ev.country }}
+                                {% elif ev.location %}
+                                    · 📍 {{ ev.location }}{% if uf %} ({{ uf }}){% endif %}
+                                {% elif ev.country %}
+                                    · 📍 {{ ev.country }}
+                                {% endif %}
                             </span><br>
-                            {% if ev.location and ev.country %}
-                                <span style="font-size:10px; color:var(--text-3);">📍 {{ ev.location }}, {{ ev.country }}</span>
-                            {% elif ev.location %}
-                                <span style="font-size:10px; color:var(--text-3);">📍 {{ ev.location }}</span>
-                            {% elif ev.country %}
-                                <span style="font-size:10px; color:var(--text-3);">📍 {{ ev.country }}</span>
-                            {% endif %}
                             {% if ev.event_type %}<span class="badge" style="font-size:9px;">{{ ev.event_type }}</span>{% endif %}
                         </a>
                         <!-- Links copiáveis -->
@@ -2278,6 +2279,10 @@ def create_templates():
                                     <span class="url-text" style="font-size:9px; color:var(--text-3);">{{ ev.link }}</span>
                                 </div>
                             {% endif %}
+                            <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                <span style="font-size:11px;">📋</span>
+                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento</a>
+                            </div>
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">🧳</span>
                                 <a href="{{ url_for('event_register_self', event_id=ev.id) }}" style="font-size:11px;">Inscrever-me neste evento</a>
