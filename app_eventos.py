@@ -1455,6 +1455,7 @@ def _filtrar_inscritos_evento():
 
 @app.route('/relatorio/inscritos')
 @login_required
+@admin_required
 def relatorio_inscritos():
     regs, filtros, opcoes = _filtrar_inscritos_evento()
     anos_disponiveis = sorted({r.event.date.year for r in Registration.query.join(Event).all()}, reverse=True)
@@ -1463,6 +1464,7 @@ def relatorio_inscritos():
 
 @app.route('/relatorio/inscritos/xlsx')
 @login_required
+@admin_required
 def relatorio_inscritos_xlsx():
     from openpyxl import Workbook
     from openpyxl.styles import Font
@@ -1509,6 +1511,7 @@ def relatorio_inscritos_xlsx():
 
 @app.route('/relatorio/inscritos/pdf')
 @login_required
+@admin_required
 def relatorio_inscritos_pdf():
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import landscape, A4
@@ -1925,9 +1928,9 @@ def create_templates():
                     {% if session.user_role == 'admin' %}
                     <a href="{{ url_for('employees') }}">Cadastro</a>
                     <a href="{{ url_for('events') }}">Eventos</a>
+                    <a href="{{ url_for('relatorio_inscritos') }}">Relatório</a>
                     {% endif %}
                     <a href="{{ url_for('registrations') }}">Inscrições</a>
-                    <a href="{{ url_for('relatorio_inscritos') }}">Relatório</a>
                     <a href="{{ url_for('logout') }}" style="color:var(--vermelho);">Sair</a>
                 </div>
                 {% endif %}
