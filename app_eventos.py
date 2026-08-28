@@ -2023,15 +2023,27 @@ def create_templates():
             <form method="post" action="{{ url_for('change_password') }}">
                 <div class="form-group">
                     <label>Senha atual</label>
-                    <input type="password" name="current_password" class="form-control" required>
+                    <div style="position:relative;">
+                        <input type="password" id="current_password" name="current_password" class="form-control" required style="padding-right:36px;">
+                        <span onclick="var i=document.getElementById('current_password'); if(i.type==='password'){i.type='text'; this.textContent='🙈';} else {i.type='password'; this.textContent='👁️';}"
+                              style="position:absolute; right:10px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:15px; user-select:none;">👁️</span>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Nova senha</label>
-                    <input type="password" name="new_password" class="form-control" minlength="6" required>
+                    <div style="position:relative;">
+                        <input type="password" id="new_password" name="new_password" class="form-control" minlength="6" required style="padding-right:36px;">
+                        <span onclick="var i=document.getElementById('new_password'); if(i.type==='password'){i.type='text'; this.textContent='🙈';} else {i.type='password'; this.textContent='👁️';}"
+                              style="position:absolute; right:10px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:15px; user-select:none;">👁️</span>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Confirmar nova senha</label>
-                    <input type="password" name="confirm_password" class="form-control" minlength="6" required>
+                    <div style="position:relative;">
+                        <input type="password" id="confirm_password" name="confirm_password" class="form-control" minlength="6" required style="padding-right:36px;">
+                        <span onclick="var i=document.getElementById('confirm_password'); if(i.type==='password'){i.type='text'; this.textContent='🙈';} else {i.type='password'; this.textContent='👁️';}"
+                              style="position:absolute; right:10px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:15px; user-select:none;">👁️</span>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary" style="width:100%;">Salvar nova senha</button>
             </form>
@@ -2308,9 +2320,9 @@ def create_templates():
                                     <span class="url-text" style="font-size:9px; color:var(--text-3);">{{ ev.link }}</span>
                                 </div>
                             {% endif %}
-                            <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                            <div style="margin-top:4px;">
                                 <a href="javascript:void(0);" onclick="document.getElementById('modal-content').innerHTML = document.getElementById('resumo-evento-{{ ev.id }}').innerHTML; document.getElementById('event-modal').style.display='flex';"
-                                   style="font-size:11px; text-decoration:none; cursor:pointer;" title="Ver resumo do evento">📄 Resumo do evento</a>
+                                   class="btn btn-secondary btn-sm" style="font-size:11px; text-decoration:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px;" title="Ver resumo do evento">📄 Ver resumo do evento</a>
                             </div>
                             <div id="resumo-evento-{{ ev.id }}" style="display:none;">
                                 <strong style="color:var(--blue); font-size:14px;">{{ ev.title }}</strong>
