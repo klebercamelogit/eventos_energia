@@ -859,6 +859,7 @@ def dashboard():
     list_has_reg = request.args.get('list_has_reg', 'todos')
     list_scope = request.args.get('list_scope', 'todos')  # 'todos' | 'nacional' | 'internacional'
     list_uf = request.args.get('list_uf', 'todos')
+    list_busca = request.args.get('list_busca', '').strip()
     list_event_id = request.args.get('list_event_id', type=int)
     event_id = request.args.get('event_id', type=int)
     view_talk = request.args.get('view_talk', type=int)
@@ -925,6 +926,10 @@ def dashboard():
     if list_uf != 'todos':
         filtered_events = [e for e in filtered_events if _uf_por_cidade(e.location) == list_uf]
 
+    if list_busca:
+        termo = _normalize_title(list_busca)
+        filtered_events = [e for e in filtered_events if termo in _normalize_title(e.title)]
+
     if list_event_id:
         filtered_events = [e for e in all_events if e.id == list_event_id]
 
@@ -938,6 +943,7 @@ def dashboard():
         anos_disponiveis = sorted(anos_disponiveis + [today.year], reverse=True)
 
     paises_disponiveis = sorted({e.country for e in all_events if e.country})
+    nomes_eventos_disponiveis = sorted({e.title for e in all_events}, key=_normalize_title)
 
     if event_id:
         recent_registrations = Registration.query.filter_by(event_id=event_id).order_by(Registration.registration_date.desc()).limit(10).all()
@@ -984,6 +990,8 @@ def dashboard():
         today_year=today.year,
         list_has_reg=list_has_reg, list_scope=list_scope,
         list_uf=list_uf,
+        list_busca=list_busca,
+        nomes_eventos_disponiveis=nomes_eventos_disponiveis,
         ufs_disponiveis=ufs_disponiveis,
         list_event_id=list_event_id,
         mes_atual=today.month,
@@ -2114,9 +2122,9 @@ def create_templates():
     <div class="card-header" style="padding:8px 12px;">
         <h2 style="font-size:13px;">{{ calendar_data.month_name }} {{ calendar_data.year }}</h2>
         <div class="flex" style="gap:3px;">
-            <a href="{{ url_for('dashboard', cal_month=cal_month-1, cal_year=cal_year, list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;">‹</a>
-            <a href="{{ url_for('dashboard', cal_month=today_month, cal_year=today_year, list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:10px;">Hoje</a>
-            <a href="{{ url_for('dashboard', cal_month=cal_month+1, cal_year=cal_year, list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;">›</a>
+            <a href="{{ url_for('dashboard', cal_month=cal_month-1, cal_year=cal_year, list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;">‹</a>
+            <a href="{{ url_for('dashboard', cal_month=today_month, cal_year=today_year, list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:10px;">Hoje</a>
+            <a href="{{ url_for('dashboard', cal_month=cal_month+1, cal_year=cal_year, list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;">›</a>
         </div>
     </div>
     <div class="card-body" style="padding:8px;">
@@ -2257,6 +2265,13 @@ def create_templates():
                     <option value="{{ uf }}" {% if list_uf == uf %}selected{% endif %}>{{ uf }}</option>
                 {% endfor %}
             </select>
+            <input type="text" name="list_busca" value="{{ list_busca }}" list="lista-nomes-eventos" placeholder="Buscar pelo nome do evento..."
+                   style="padding:3px 6px; font-size:11px; border-radius:4px; border:1px solid var(--border); background:var(--surface); min-width:180px; flex:1 1 180px;">
+            <datalist id="lista-nomes-eventos">
+                {% for nome in nomes_eventos_disponiveis %}
+                    <option value="{{ nome }}">
+                {% endfor %}
+            </datalist>
             <button type="submit" class="btn btn-primary btn-sm" style="padding:3px 10px; font-size:11px;">Filtrar</button>
         </form>
         <script>
@@ -2289,7 +2304,7 @@ def create_templates():
                 <li style="padding:8px 0; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; 
                            {% if selected_event_id == ev.id %}background:var(--surface-2); border-left:3px solid var(--orange); padding-left:8px;{% endif %}">
                     <div style="flex:1; min-width:120px;">
-                        <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="display:block; text-decoration:none; color:var(--text);">
+                        <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca, event_id=ev.id) }}" style="display:block; text-decoration:none; color:var(--text);">
                             <strong style="font-size:13px;">{{ ev.title }}</strong><br>
                             <span style="font-size:11px; color:var(--text-2);">
                                 📅 {{ ev.date.strftime('%d/%m/%Y') }}{% if ev.time %} - {{ ev.time }}{% endif %}
@@ -2341,12 +2356,12 @@ def create_templates():
                             </div>
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">📋</span>
-                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento ({{ ev.talks|length }})</a>
+                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento ({{ ev.talks|length }})</a>
                             </div>
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">🧳</span>
                                 <a href="{{ url_for('event_register_self', event_id=ev.id) }}" style="font-size:11px;">Inscrever-me neste evento</a>
-                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, view_event=(None if view_event == ev.id else ev.id)) }}"
+                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca, view_event=(None if view_event == ev.id else ev.id)) }}"
                                    style="font-size:11px; margin-left:4px;" title="Ver quem está inscrito">👁️ ({{ ev.registrations|length }})</a>
                             </div>
                             {% if view_event == ev.id %}
@@ -2397,9 +2412,9 @@ def create_templates():
                                                 <div style="font-size:11px; color:var(--text-3);">{{ talk.description }}</div>
                                             </div>
                                             <div style="display:flex; gap:6px; align-items:center; white-space:nowrap;">
-                                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id, register_talk=(None if register_talk == talk.id else talk.id), view_talk=view_talk) }}"
+                                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca, event_id=ev.id, register_talk=(None if register_talk == talk.id else talk.id), view_talk=view_talk) }}"
                                                    title="Inscrever-se nessa palestra" style="font-size:14px; text-decoration:none;">➕👤</a>
-                                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id, view_talk=(None if view_talk == talk.id else talk.id), register_talk=register_talk) }}"
+                                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca, event_id=ev.id, view_talk=(None if view_talk == talk.id else talk.id), register_talk=register_talk) }}"
                                                    title="Ver quem já está inscrito" style="font-size:14px; text-decoration:none;">👁️ <span style="font-size:10px; color:var(--text-3);">({{ talk_reg_counts.get(talk.id, 0) }})</span></a>
                                                 {% if current_user.is_admin() %}
                                                     <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');" style="display:inline;">
@@ -2459,7 +2474,7 @@ def create_templates():
                     <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
                         <span style="font-size:11px; color:var(--orange);">{{ ev.days_until() }} dias</span>
                         {% if selected_event_id == ev.id %}
-                            <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:10px;">Fechar</a>
+                            <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, list_busca=list_busca) }}" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:10px;">Fechar</a>
                         {% endif %}
                     </div>
                 </li>
