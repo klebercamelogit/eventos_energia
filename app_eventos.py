@@ -850,6 +850,7 @@ def dashboard():
     event_id = request.args.get('event_id', type=int)
     view_talk = request.args.get('view_talk', type=int)
     register_talk = request.args.get('register_talk', type=int)
+    view_event = request.args.get('view_event', type=int)
 
     # Navegação do calendário (independente do filtro da tabela de Eventos)
     try:
@@ -979,6 +980,7 @@ def dashboard():
         talk_reg_counts=talk_reg_counts,
         view_talk=view_talk,
         register_talk=register_talk,
+        view_event=view_event,
         talk_registrants=talk_registrants,
         all_users=all_users,
         event_selected=event_selected,
@@ -2164,7 +2166,7 @@ def create_templates():
     {% endif %}{% endfor %}{% endfor %}
 </div>
 
-<!-- Modal de inscritos no evento (compartilhado por todos os dias do calendário e pelo ícone de cada evento) -->
+<!-- Modal de inscritos no evento (compartilhado por todos os dias do calendário) -->
 <div id="event-modal" onclick="if(event.target===this) this.style.display='none';" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border-radius:var(--r-md); padding:16px; max-width:360px; width:90%; max-height:70vh; overflow-y:auto; position:relative;">
         <button onclick="document.getElementById('event-modal').style.display='none';" style="position:absolute; top:8px; right:8px; border:none; background:none; font-size:16px; cursor:pointer; color:var(--text-3);">✕</button>
@@ -2286,29 +2288,31 @@ def create_templates():
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">🧳</span>
                                 <a href="{{ url_for('event_register_self', event_id=ev.id) }}" style="font-size:11px;">Inscrever-me neste evento</a>
-                                <a href="javascript:void(0);" onclick="document.getElementById('modal-content').innerHTML = document.getElementById('event-regs-{{ ev.id }}').innerHTML; document.getElementById('event-modal').style.display='flex';"
-                                   style="font-size:11px; margin-left:4px; cursor:pointer;" title="Ver quem está inscrito">👁️ ({{ ev.registrations|length }})</a>
+                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id, view_event=(None if view_event == ev.id else ev.id)) }}"
+                                   style="font-size:11px; margin-left:4px;" title="Ver quem está inscrito">👁️ ({{ ev.registrations|length }})</a>
                             </div>
-                            <div id="event-regs-{{ ev.id }}" style="display:none;">
-                                <strong style="color:var(--blue); font-size:13px;">{{ ev.title }}</strong>
-                                <ul style="list-style:none; margin:4px 0 0 0; padding:0; font-size:12px;">
-                                    {% for reg in ev.registrations %}
-                                        <li style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
-                                            <span>
-                                                {{ reg.user.name }}{% if reg.hotel_name %} — 🏨 {{ reg.hotel_name }}{% endif %}
-                                                {% if reg.user_id == current_user.id %}<span style="color:var(--blue); font-size:10px;">— você</span>{% endif %}
-                                            </span>
-                                            {% if current_user.is_admin() or reg.user_id == current_user.id %}
-                                                <form method="post" action="{{ url_for('registration_delete', reg_id=reg.id) }}" onsubmit="return confirm('{{ 'Cancelar sua inscrição neste evento?' if reg.user_id == current_user.id else 'Remover ' + reg.user.name + ' deste evento?' }}');">
-                                                    <button type="submit" style="border:none; background:none; color:var(--text-3); cursor:pointer; font-size:11px;" title="Cancelar inscrição">❌</button>
-                                                </form>
-                                            {% endif %}
-                                        </li>
-                                    {% else %}
-                                        <li style="color:var(--text-3);">Ninguém inscrito ainda.</li>
-                                    {% endfor %}
-                                </ul>
-                            </div>
+                            {% if view_event == ev.id %}
+                                <div style="margin-top:6px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
+                                    <strong style="color:var(--blue); font-size:12px;">👥 Inscritos:</strong>
+                                    <ul style="list-style:none; margin:4px 0 0 0; padding:0; font-size:12px;">
+                                        {% for reg in ev.registrations %}
+                                            <li style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
+                                                <span>
+                                                    {{ reg.user.name }}{% if reg.hotel_name %} — 🏨 {{ reg.hotel_name }}{% endif %}
+                                                    {% if reg.user_id == current_user.id %}<span style="color:var(--blue); font-size:10px;">— você</span>{% endif %}
+                                                </span>
+                                                {% if current_user.is_admin() or reg.user_id == current_user.id %}
+                                                    <form method="post" action="{{ url_for('registration_delete', reg_id=reg.id) }}" onsubmit="return confirm('{{ 'Cancelar sua inscrição neste evento?' if reg.user_id == current_user.id else 'Remover ' + reg.user.name + ' deste evento?' }}');">
+                                                        <button type="submit" style="border:none; background:none; color:var(--text-3); cursor:pointer; font-size:11px;" title="Cancelar inscrição">❌</button>
+                                                    </form>
+                                                {% endif %}
+                                            </li>
+                                        {% else %}
+                                            <li style="color:var(--text-3);">Ninguém inscrito ainda.</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
                         </div>
                         <!-- Exibe palestras se for o evento selecionado -->
                         {% if selected_event_id == ev.id %}
