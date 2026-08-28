@@ -2320,9 +2320,10 @@ def create_templates():
                                     <span class="url-text" style="font-size:9px; color:var(--text-3);">{{ ev.link }}</span>
                                 </div>
                             {% endif %}
-                            <div style="margin-top:4px;">
+                            <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                <span style="font-size:11px;">📄</span>
                                 <a href="javascript:void(0);" onclick="document.getElementById('modal-content').innerHTML = document.getElementById('resumo-evento-{{ ev.id }}').innerHTML; document.getElementById('event-modal').style.display='flex';"
-                                   class="btn btn-secondary btn-sm" style="font-size:11px; text-decoration:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px;" title="Ver resumo do evento">📄 Ver resumo do evento</a>
+                                   style="font-size:11px; cursor:pointer;" title="Ver resumo do evento">Resumo do evento</a>
                             </div>
                             <div id="resumo-evento-{{ ev.id }}" style="display:none;">
                                 <strong style="color:var(--blue); font-size:14px;">{{ ev.title }}</strong>
