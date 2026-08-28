@@ -96,6 +96,8 @@ class Event(db.Model):
     event_type = db.Column(db.String(100), nullable=True)
     location = db.Column(db.String(100), nullable=True)      # Estado/Cidade
     country = db.Column(db.String(100), nullable=True)
+    address = db.Column(db.String(300), nullable=True)        # Endereço/local físico (ex: nome do espaço/venue)
+    organizer = db.Column(db.String(200), nullable=True)      # Organização responsável pelo evento
     source = db.Column(db.String(20), default='manual')      # 'auto' (IA) ou 'manual' (cadastrado à mão)
     source_url = db.Column(db.String(500), nullable=True)    # URL onde a IA encontrou a informação
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -412,6 +414,19 @@ def _uf_por_cidade(location):
 app.jinja_env.globals['uf_por_cidade'] = _uf_por_cidade
 
 
+_DIAS_SEMANA_PT = ['segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado', 'domingo']
+
+
+def _dia_semana_pt(date_obj):
+    """Retorna o nome do dia da semana em português a partir de um objeto date."""
+    if not date_obj:
+        return ''
+    return _DIAS_SEMANA_PT[date_obj.weekday()]
+
+
+app.jinja_env.globals['dia_semana_pt'] = _dia_semana_pt
+
+
 def _extrair_cidade_pais(texto_bruto, titulo):
     """
     A listagem traz tudo junto no texto do link: "DD/MM/AAAA a DD/MM/AAAA Título Cidade, País".
@@ -465,15 +480,9 @@ def fetch_events_from_web():
 
         cidade, pais = _extrair_cidade_pais(texto_bruto, detalhe['title'])
 
-        descricao_partes = []
-        if detalhe['venue']:
-            descricao_partes.append(f"Local: {detalhe['venue']}")
-        if detalhe['organizador']:
-            descricao_partes.append(f"Organização: {detalhe['organizador']}")
-
         validos.append({
             'title': detalhe['title'],
-            'description': ' | '.join(descricao_partes),
+            'description': '',  # o site não traz um resumo narrativo real, só metadados — deixamos em branco pra edição manual
             'date': data_inicio,
             'time': None,
             'site': detalhe['site'] or f"{BASE_URL}/eventos/{event_id}",
@@ -481,6 +490,8 @@ def fetch_events_from_web():
             'event_type': '',
             'location': cidade or detalhe['venue'],
             'country': pais,
+            'address': detalhe['venue'] or '',
+            'organizer': detalhe['organizador'] or '',
         })
 
     return validos
@@ -608,6 +619,8 @@ def update_events():
             event.event_type = ev_data['event_type']
             event.location = ev_data['location']
             event.country = ev_data['country']
+            event.address = ev_data.get('address', '')
+            event.organizer = ev_data.get('organizer', '')
             event.source = 'auto'
             event.normalized_key = chave
 
@@ -1109,6 +1122,8 @@ def event_add():
         event_type = request.form.get('event_type', '').strip()
         location = request.form.get('location', '').strip()
         country = request.form.get('country', '').strip()
+        address = request.form.get('address', '').strip()
+        organizer = request.form.get('organizer', '').strip()
 
         if not title or not date_str:
             flash('Título e Data são obrigatórios.', 'danger')
@@ -1135,6 +1150,8 @@ def event_add():
             event_type=event_type,
             location=location,
             country=country,
+            address=address,
+            organizer=organizer,
             normalized_key=chave
         )
         db.session.add(event)
@@ -1160,6 +1177,8 @@ def event_edit(event_id):
         event.event_type = request.form.get('event_type', '').strip()
         event.location = request.form.get('location', '').strip()
         event.country = request.form.get('country', '').strip()
+        event.address = request.form.get('address', '').strip()
+        event.organizer = request.form.get('organizer', '').strip()
 
         if not event.title or not date_str:
             flash('Título e Data são obrigatórios.', 'danger')
@@ -2179,7 +2198,6 @@ def create_templates():
 <div id="event-modal" onclick="if(event.target===this) this.style.display='none';" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border-radius:var(--r-md); padding:16px; max-width:360px; width:90%; max-height:70vh; overflow-y:auto; position:relative;">
         <button onclick="document.getElementById('event-modal').style.display='none';" style="position:absolute; top:8px; right:8px; border:none; background:none; font-size:16px; cursor:pointer; color:var(--text-3);">✕</button>
-        <h3 style="margin:0 0 10px 0; font-size:14px;">👥 Inscritos</h3>
         <div id="modal-content"></div>
     </div>
 </div>
@@ -2291,6 +2309,24 @@ def create_templates():
                                 </div>
                             {% endif %}
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                <a href="javascript:void(0);" onclick="document.getElementById('modal-content').innerHTML = document.getElementById('resumo-evento-{{ ev.id }}').innerHTML; document.getElementById('event-modal').style.display='flex';"
+                                   style="font-size:11px; text-decoration:none; cursor:pointer;" title="Ver resumo do evento">📄 Resumo do evento</a>
+                            </div>
+                            <div id="resumo-evento-{{ ev.id }}" style="display:none;">
+                                <strong style="color:var(--blue); font-size:14px;">{{ ev.title }}</strong>
+                                <div style="margin-top:8px; font-size:12px; line-height:1.6;">
+                                    <p style="margin:0 0 8px 0; color:var(--text-2);">
+                                        {% if ev.description %}{{ ev.description }}{% else %}<em style="color:var(--text-3);">Resumo não disponível — o admin pode adicionar um na edição do evento.</em>{% endif %}
+                                    </p>
+                                    <p style="margin:4px 0;"><strong>📅 Data:</strong> {{ ev.date.strftime('%d/%m/%Y') }} ({{ dia_semana_pt(ev.date) }})</p>
+                                    {% if ev.address %}<p style="margin:4px 0;"><strong>📍 Endereço:</strong> {{ ev.address }}</p>{% endif %}
+                                    {% if ev.location or ev.country %}
+                                        <p style="margin:4px 0;"><strong>🌍 Local:</strong> {{ ev.location }}{% if ev.location and ev.country %}, {% endif %}{{ ev.country }}</p>
+                                    {% endif %}
+                                    {% if ev.organizer %}<p style="margin:4px 0;"><strong>🏢 Organização:</strong> {{ ev.organizer }}</p>{% endif %}
+                                </div>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">📋</span>
                                 <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento ({{ ev.talks|length }})</a>
                             </div>
@@ -2325,12 +2361,6 @@ def create_templates():
                         </div>
                         <!-- Exibe palestras se for o evento selecionado -->
                         {% if selected_event_id == ev.id %}
-                            {% if ev.description %}
-                                <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
-                                    <strong style="font-size:12px; color:var(--blue);">📄 Resumo do evento</strong>
-                                    <p style="font-size:12px; color:var(--text-2); margin:4px 0 0 0;">{{ ev.description }}</p>
-                                </div>
-                            {% endif %}
                             <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
                                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                                     <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
@@ -2605,6 +2635,10 @@ def create_templates():
             <div class="form-row">
                 <div class="form-group"><label>Estado / Cidade</label><input type="text" name="location" class="form-control" value="{{ event.location if event else '' }}" placeholder="Ex: São Paulo"></div>
                 <div class="form-group"><label>País</label><input type="text" name="country" class="form-control" value="{{ event.country if event else '' }}" placeholder="Ex: Brasil"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Endereço / Local físico</label><input type="text" name="address" class="form-control" value="{{ event.address if event else '' }}" placeholder="Ex: Expo Center Norte"></div>
+                <div class="form-group"><label>Organização</label><input type="text" name="organizer" class="form-control" value="{{ event.organizer if event else '' }}" placeholder="Ex: Informa Markets"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Link do Evento (site oficial)</label><input type="url" name="site" class="form-control" value="{{ event.site if event else '' }}" placeholder="https://..."></div>
@@ -3045,6 +3079,12 @@ def init_db():
                 if 'normalized_key' not in columns:
                     conn.execute(text("ALTER TABLE events ADD COLUMN normalized_key VARCHAR(300)"))
                     print("➕ normalized_key (events) adicionada")
+                if 'address' not in columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN address VARCHAR(300)"))
+                    print("➕ address adicionada")
+                if 'organizer' not in columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN organizer VARCHAR(200)"))
+                    print("➕ organizer adicionada")
                 conn.commit()
         except Exception as e:
             # IMPORTANTE: nunca apagamos a tabela events automaticamente aqui.
