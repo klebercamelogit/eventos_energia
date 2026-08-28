@@ -100,6 +100,7 @@ class Event(db.Model):
     source_url = db.Column(db.String(500), nullable=True)    # URL onde a IA encontrou a informação
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    normalized_key = db.Column(db.String(300), unique=True, nullable=True)  # nome normalizado + data — trava duplicata no banco
 
     def days_until(self):
         if self.date:
@@ -119,6 +120,7 @@ class Talk(db.Model):
     time = db.Column(db.String(20), nullable=True)
     description = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    normalized_key = db.Column(db.String(300), unique=True, nullable=True)  # evento + nome normalizado — trava duplicata no banco
 
     registrations = db.relationship('TalkRegistration', backref='talk', cascade='all, delete-orphan')
 
@@ -264,6 +266,16 @@ def _normalize_title(title):
     nfkd = unicodedata.normalize('NFKD', title)
     ascii_str = nfkd.encode('ASCII', 'ignore').decode('ASCII')
     return re.sub(r'\s+', ' ', ascii_str.lower().strip())
+
+
+def _event_key(title, date):
+    """Chave única de evento: nome normalizado + data. Trava duplicata no nível do banco."""
+    return f"{_normalize_title(title)}|{date.isoformat()}"
+
+
+def _talk_key(event_id, title):
+    """Chave única de palestra: evento + nome normalizado. Trava duplicata no nível do banco."""
+    return f"{event_id}|{_normalize_title(title)}"
 
 
 def _is_relevante(titulo):
@@ -479,24 +491,23 @@ def fetch_events_from_web():
 # ============================================================
 def _deduplicar_eventos_auto():
     """
-    Mescla eventos automáticos duplicados (mesmo título normalizado) que ficaram
-    no banco — provavelmente de execuções antigas do scraper, antes da correção
-    da paginação. Mantém o mais antigo, move palestras/inscrições dele pros
-    outros antes de apagar os duplicados, pra não perder nenhuma inscrição.
+    Mescla eventos automáticos duplicados (mesmo título normalizado + data) que
+    ficaram no banco — de execuções antigas do scraper, antes da correção da
+    paginação e da chave única. Mantém o mais antigo, move palestras/inscrições
+    dele pros outros antes de apagar os duplicados, pra não perder nada.
+    Também preenche a normalized_key de quem ainda não tem (backfill).
     """
     todos = Event.query.filter_by(source='auto').order_by(Event.id.asc()).all()
     grupos = {}
     for e in todos:
-        chave = (_normalize_title(e.title), e.date)
+        chave = _event_key(e.title, e.date)
         grupos.setdefault(chave, []).append(e)
 
     removidos = 0
     for chave, eventos_grupo in grupos.items():
-        if len(eventos_grupo) <= 1:
-            continue
         principal = eventos_grupo[0]  # o de menor id (mais antigo)
-        duplicados = eventos_grupo[1:]
-        for dup in duplicados:
+        principal.normalized_key = chave
+        for dup in eventos_grupo[1:]:
             # Move palestras do duplicado pro evento principal, em vez de apagar
             for t in Talk.query.filter_by(event_id=dup.id).all():
                 t.event_id = principal.id
@@ -510,10 +521,45 @@ def _deduplicar_eventos_auto():
             db.session.delete(dup)
             removidos += 1
 
+    db.session.commit()
     if removidos:
-        db.session.commit()
         print(f"🧹 {removidos} evento(s) duplicado(s) mesclado(s) no evento principal.")
+    _deduplicar_talks()
     return removidos
+
+
+def _deduplicar_talks():
+    """
+    Mescla palestras duplicadas (mesmo evento + título normalizado), movendo as
+    inscrições da duplicada pra sobrevivente antes de apagar. Também preenche a
+    normalized_key de quem ainda não tem.
+    """
+    todas = Talk.query.order_by(Talk.id.asc()).all()
+    grupos = {}
+    for t in todas:
+        chave = _talk_key(t.event_id, t.title)
+        grupos.setdefault(chave, []).append(t)
+
+    removidas = 0
+    for chave, talks_grupo in grupos.items():
+        principal = talks_grupo[0]
+        principal.normalized_key = chave
+        for dup in talks_grupo[1:]:
+            for reg in TalkRegistration.query.filter_by(talk_id=dup.id).all():
+                ja_existe = TalkRegistration.query.filter_by(talk_id=principal.id, user_id=reg.user_id).first()
+                if ja_existe:
+                    if reg.evidence_path:
+                        remover_arquivo(reg.evidence_path)
+                    db.session.delete(reg)
+                else:
+                    reg.talk_id = principal.id
+            db.session.delete(dup)
+            removidas += 1
+
+    db.session.commit()
+    if removidas:
+        print(f"🧹 {removidas} palestra(s) duplicada(s) mesclada(s) na palestra principal.")
+    return removidas
 
 
 def update_events():
@@ -538,15 +584,18 @@ def update_events():
         vistos_agora = set()
 
         for ev_data in eventos:
-            chave = _normalize_title(ev_data['title'])
+            chave = _event_key(ev_data['title'], ev_data['date'])
             vistos_agora.add(chave)
 
-            # Procura evento automático já existente com título equivalente
-            candidatos = Event.query.filter_by(source='auto').all()
-            event = next((e for e in candidatos if _normalize_title(e.title) == chave), None)
+            event = Event.query.filter_by(normalized_key=chave).first()
+
+            if event and event.source == 'manual':
+                # Já existe um evento cadastrado manualmente com esse nome+data —
+                # a chave é única na tabela inteira, então não criamos outro nem sobrescrevemos o manual.
+                continue
 
             if not event:
-                event = Event(title=ev_data['title'], date=ev_data['date'], source='auto')
+                event = Event(title=ev_data['title'], date=ev_data['date'], source='auto', normalized_key=chave)
                 db.session.add(event)
 
             event.title = ev_data['title']
@@ -560,6 +609,7 @@ def update_events():
             event.location = ev_data['location']
             event.country = ev_data['country']
             event.source = 'auto'
+            event.normalized_key = chave
 
         # Remove eventos automáticos que sumiram da busca — mas SÓ se ainda não aconteceram.
         # Eventos com data no passado NUNCA são removidos aqui: viram histórico permanente,
@@ -571,7 +621,7 @@ def update_events():
         antigos = Event.query.filter_by(source='auto').filter(Event.date >= hoje).all()
         removidos = 0
         for e in antigos:
-            if _normalize_title(e.title) not in vistos_agora:
+            if (e.normalized_key or _event_key(e.title, e.date)) not in vistos_agora:
                 talks = Talk.query.filter_by(event_id=e.id).all()
                 for t in talks:
                     for reg in TalkRegistration.query.filter_by(talk_id=t.id).all():
@@ -1068,6 +1118,11 @@ def event_add():
             flash('Data inválida.', 'danger')
             return render_template('event_form.html', event=None, action='add')
 
+        chave = _event_key(title, date_obj)
+        if Event.query.filter_by(normalized_key=chave).first():
+            flash('❌ Já existe um evento com esse nome nessa data. A informação não pode ser duplicada.', 'danger')
+            return render_template('event_form.html', event=None, action='add')
+
         event = Event(
             title=title,
             description=description,
@@ -1077,7 +1132,8 @@ def event_add():
             site=site,
             event_type=event_type,
             location=location,
-            country=country
+            country=country,
+            normalized_key=chave
         )
         db.session.add(event)
         db.session.commit()
@@ -1108,11 +1164,19 @@ def event_edit(event_id):
             return render_template('event_form.html', event=event, action='edit')
 
         try:
-            event.date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            nova_data = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
             flash('Data inválida.', 'danger')
             return render_template('event_form.html', event=event, action='edit')
 
+        chave = _event_key(event.title, nova_data)
+        outro = Event.query.filter(Event.normalized_key == chave, Event.id != event.id).first()
+        if outro:
+            flash('❌ Já existe outro evento com esse nome nessa data. A informação não pode ser duplicada.', 'danger')
+            return render_template('event_form.html', event=event, action='edit')
+
+        event.date = nova_data
+        event.normalized_key = chave
         db.session.commit()
         flash('Evento atualizado com sucesso!', 'success')
         return redirect(url_for('events'))
@@ -1160,12 +1224,18 @@ def event_talk_add(event_id):
     if not title:
         flash('❌ A palestra precisa de um título.', 'danger')
     else:
+        chave = _talk_key(event.id, title)
+        if Talk.query.filter_by(normalized_key=chave).first():
+            flash('❌ Essa palestra já está cadastrada nesse evento. A informação não pode ser duplicada.', 'danger')
+            return redirect(url_for('event_talks', event_id=event.id))
+
         talk = Talk(
             event_id=event.id,
             title=title,
             speaker=request.form.get('speaker', '').strip(),
             time=request.form.get('time', '').strip(),
-            description=request.form.get('description', '').strip()
+            description=request.form.get('description', '').strip(),
+            normalized_key=chave
         )
         db.session.add(talk)
         db.session.commit()
@@ -1558,20 +1628,6 @@ def manual_update():
               f"{resultado['removed']} removidos por não aparecerem mais na busca.", 'success')
     else:
         flash(f"❌ Falha ao buscar eventos: {resultado['error']}", 'danger')
-    return redirect(request.referrer or url_for('events'))
-
-
-@app.route('/events/limpar-duplicatas', methods=['POST'])
-@login_required
-@admin_required
-def limpar_duplicatas():
-    """Roda só a limpeza de duplicatas, sem depender da busca de eventos na web funcionar."""
-    with app.app_context():
-        removidos = _deduplicar_eventos_auto()
-    if removidos:
-        flash(f"🧹 {removidos} evento(s) duplicado(s) mesclado(s) com sucesso.", 'success')
-    else:
-        flash("✅ Nenhuma duplicata encontrada.", 'success')
     return redirect(request.referrer or url_for('events'))
 
 
@@ -2393,9 +2449,6 @@ def create_templates():
         <form method="post" action="{{ url_for('manual_update') }}" style="display:inline;">
             <button type="submit" class="btn btn-warning">🔄 Atualizar Eventos</button>
         </form>
-        <form method="post" action="{{ url_for('limpar_duplicatas') }}" style="display:inline;">
-            <button type="submit" class="btn btn-secondary" onclick="return confirm('Mesclar eventos duplicados (mesmo título e data)?');">🧹 Limpar Duplicatas</button>
-        </form>
         <a href="{{ url_for('event_add') }}" class="btn btn-success">+ Novo Evento</a>
     </div>
 </div>
@@ -2905,6 +2958,9 @@ def init_db():
                 if 'updated_at' not in columns:
                     conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
                     print("➕ updated_at adicionada")
+                if 'normalized_key' not in columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN normalized_key VARCHAR(300)"))
+                    print("➕ normalized_key (events) adicionada")
                 conn.commit()
         except Exception as e:
             # IMPORTANTE: nunca apagamos a tabela events automaticamente aqui.
@@ -2912,6 +2968,47 @@ def init_db():
             # deixando os dados como estão pra investigação manual se precisar.
             print(f"⚠️ Erro ao adicionar colunas em events: {e}")
             print("   Nenhum dado foi apagado. Verifique manualmente se precisar.")
+
+        try:
+            with db.engine.connect() as conn:
+                result = conn.execute(text("PRAGMA table_info(talks)"))
+                columns = [row[1] for row in result]
+                if columns and 'normalized_key' not in columns:
+                    conn.execute(text("ALTER TABLE talks ADD COLUMN normalized_key VARCHAR(300)"))
+                    print("➕ normalized_key (talks) adicionada")
+                    conn.commit()
+        except Exception as e:
+            print(f"⚠️ Erro ao adicionar normalized_key em talks: {e}")
+
+        # Limpa duplicatas que já existiam ANTES da chave única existir — precisa
+        # rodar antes de criar o índice único, senão a criação do índice falha.
+        try:
+            _deduplicar_eventos_auto()
+        except Exception as e:
+            print(f"⚠️ Erro ao deduplicar eventos/palestras: {e}")
+
+        # Preenche a chave de quem ainda não tem (inclusive eventos/palestras manuais,
+        # que a deduplicação automática não mexe)
+        try:
+            for e in Event.query.filter(Event.normalized_key.is_(None)).all():
+                e.normalized_key = _event_key(e.title, e.date)
+            for t in Talk.query.filter(Talk.normalized_key.is_(None)).all():
+                t.normalized_key = _talk_key(t.event_id, t.title)
+            db.session.commit()
+        except Exception as e:
+            print(f"⚠️ Erro ao preencher normalized_key: {e}")
+
+        # Só agora cria os índices únicos — depois de garantir que não há mais duplicata.
+        # Se ainda houver alguma (ex: duplicata manual que a limpeza automática não mescla),
+        # a criação falha e avisa no log, mas não trava o resto da aplicação.
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_normalized_key ON events(normalized_key)"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_talks_normalized_key ON talks(normalized_key)"))
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ Não foi possível criar o índice único (provável duplicata manual residual): {e}")
+            print("   Verifique manualmente eventos/palestras com nome e data repetidos.")
 
         try:
             with db.engine.connect() as conn:
