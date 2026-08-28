@@ -1243,6 +1243,32 @@ def event_talk_add(event_id):
     return redirect(url_for('event_talks', event_id=event.id))
 
 
+@app.route('/talks/<int:talk_id>/edit', methods=['POST'])
+@login_required
+@admin_required
+def event_talk_edit(talk_id):
+    talk = Talk.query.get_or_404(talk_id)
+    title = request.form.get('title', '').strip()
+    if not title:
+        flash('❌ A palestra precisa de um título.', 'danger')
+        return redirect(url_for('event_talks', event_id=talk.event_id))
+
+    nova_chave = _talk_key(talk.event_id, title)
+    outra = Talk.query.filter(Talk.normalized_key == nova_chave, Talk.id != talk.id).first()
+    if outra:
+        flash('❌ Já existe outra palestra com esse título nesse evento. A informação não pode ser duplicada.', 'danger')
+        return redirect(url_for('event_talks', event_id=talk.event_id))
+
+    talk.title = title
+    talk.speaker = request.form.get('speaker', '').strip()
+    talk.time = request.form.get('time', '').strip()
+    talk.description = request.form.get('description', '').strip()
+    talk.normalized_key = nova_chave
+    db.session.commit()
+    flash('✅ Palestra atualizada.', 'success')
+    return redirect(url_for('event_talks', event_id=talk.event_id))
+
+
 @app.route('/talks/<int:talk_id>/delete', methods=['POST'])
 @login_required
 @admin_required
@@ -2280,9 +2306,18 @@ def create_templates():
                             </div>
                         </div>
                         <!-- Exibe palestras se for o evento selecionado -->
-                        {% if selected_event_id == ev.id and talks %}
+                        {% if selected_event_id == ev.id %}
                             <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
                                 <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
+                                {% if not talks %}
+                                    <p style="font-size:12px; color:var(--text-3); margin:6px 0 0 0;">
+                                        Nenhuma palestra cadastrada ainda para esse evento.
+                                        {% if current_user.is_admin() %}
+                                            <br><a href="{{ url_for('event_talks', event_id=ev.id) }}">+ Cadastrar palestra</a>
+                                        {% endif %}
+                                        {% if ev.site %}<br><a href="{{ ev.site }}" target="_blank">Ver programação completa no site do evento →</a>{% endif %}
+                                    </p>
+                                {% endif %}
                                 {% for talk in talks %}
                                     <div class="talk-item">
                                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; flex-wrap:wrap;">
@@ -2585,16 +2620,34 @@ def create_templates():
     <div class="card-body">
         {% if talks %}
             {% for talk in talks %}
-                <div class="talk-item" style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-                    <div>
-                        <span class="talk-time">{{ talk.time }}</span>
-                        <strong>{{ talk.title }}</strong>
-                        {% if talk.speaker %}<span style="font-size:12px; color:var(--text-2);"> - {{ talk.speaker }}</span>{% endif %}
-                        <div style="font-size:12px; color:var(--text-3);">{{ talk.description }}</div>
+                <div class="talk-item">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+                        <div>
+                            <span class="talk-time">{{ talk.time }}</span>
+                            <strong>{{ talk.title }}</strong>
+                            {% if talk.speaker %}<span style="font-size:12px; color:var(--text-2);"> - {{ talk.speaker }}</span>{% endif %}
+                            <div style="font-size:12px; color:var(--text-3);">{{ talk.description }}</div>
+                        </div>
+                        <div class="flex gap-8" style="flex-shrink:0;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-talk-{{ talk.id }}').style.display = document.getElementById('edit-talk-{{ talk.id }}').style.display === 'none' ? 'block' : 'none';">Editar</button>
+                            <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');">
+                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                            </form>
+                        </div>
                     </div>
-                    <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');">
-                        <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
-                    </form>
+                    <div id="edit-talk-{{ talk.id }}" style="display:none; margin-top:10px; padding:10px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
+                        <form method="post" action="{{ url_for('event_talk_edit', talk_id=talk.id) }}">
+                            <div class="form-group"><label>Título</label><input type="text" name="title" class="form-control" value="{{ talk.title }}" required></div>
+                            <div class="form-row">
+                                <div class="form-group"><label>Palestrante</label><input type="text" name="speaker" class="form-control" value="{{ talk.speaker or '' }}"></div>
+                                <div class="form-group"><label>Horário</label><input type="text" name="time" class="form-control" value="{{ talk.time or '' }}" placeholder="Ex: 14:00"></div>
+                            </div>
+                            <div class="form-group"><label>Descrição</label><textarea name="description" class="form-control" rows="2">{{ talk.description or '' }}</textarea></div>
+                            <div class="flex" style="justify-content:flex-end;">
+                                <button type="submit" class="btn btn-primary btn-sm">Salvar alterações</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             {% endfor %}
         {% else %}
