@@ -850,7 +850,6 @@ def dashboard():
     event_id = request.args.get('event_id', type=int)
     view_talk = request.args.get('view_talk', type=int)
     register_talk = request.args.get('register_talk', type=int)
-    view_event = request.args.get('view_event', type=int)
 
     # Navegação do calendário (independente do filtro da tabela de Eventos)
     try:
@@ -980,7 +979,6 @@ def dashboard():
         talk_reg_counts=talk_reg_counts,
         view_talk=view_talk,
         register_talk=register_talk,
-        view_event=view_event,
         talk_registrants=talk_registrants,
         all_users=all_users,
         event_selected=event_selected,
@@ -1245,32 +1243,6 @@ def event_talk_add(event_id):
     return redirect(url_for('event_talks', event_id=event.id))
 
 
-@app.route('/talks/<int:talk_id>/edit', methods=['POST'])
-@login_required
-@admin_required
-def event_talk_edit(talk_id):
-    talk = Talk.query.get_or_404(talk_id)
-    title = request.form.get('title', '').strip()
-    if not title:
-        flash('❌ A palestra precisa de um título.', 'danger')
-        return redirect(url_for('event_talks', event_id=talk.event_id))
-
-    nova_chave = _talk_key(talk.event_id, title)
-    outra = Talk.query.filter(Talk.normalized_key == nova_chave, Talk.id != talk.id).first()
-    if outra:
-        flash('❌ Já existe outra palestra com esse título nesse evento. A informação não pode ser duplicada.', 'danger')
-        return redirect(url_for('event_talks', event_id=talk.event_id))
-
-    talk.title = title
-    talk.speaker = request.form.get('speaker', '').strip()
-    talk.time = request.form.get('time', '').strip()
-    talk.description = request.form.get('description', '').strip()
-    talk.normalized_key = nova_chave
-    db.session.commit()
-    flash('✅ Palestra atualizada.', 'success')
-    return redirect(url_for('event_talks', event_id=talk.event_id))
-
-
 @app.route('/talks/<int:talk_id>/delete', methods=['POST'])
 @login_required
 @admin_required
@@ -1283,7 +1255,7 @@ def event_talk_delete(talk_id):
     db.session.delete(talk)
     db.session.commit()
     flash('🗑️ Palestra removida.', 'success')
-    return redirect(request.referrer or url_for('event_talks', event_id=event_id))
+    return redirect(url_for('event_talks', event_id=event_id))
 
 
 
@@ -2166,7 +2138,7 @@ def create_templates():
     {% endif %}{% endfor %}{% endfor %}
 </div>
 
-<!-- Modal de inscritos no evento (compartilhado por todos os dias do calendário) -->
+<!-- Modal de inscritos no evento (compartilhado por todos os dias do calendário e pelo ícone de cada evento) -->
 <div id="event-modal" onclick="if(event.target===this) this.style.display='none';" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border-radius:var(--r-md); padding:16px; max-width:360px; width:90%; max-height:70vh; overflow-y:auto; position:relative;">
         <button onclick="document.getElementById('event-modal').style.display='none';" style="position:absolute; top:8px; right:8px; border:none; background:none; font-size:16px; cursor:pointer; color:var(--text-3);">✕</button>
@@ -2253,16 +2225,15 @@ def create_templates():
                         <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="display:block; text-decoration:none; color:var(--text);">
                             <strong style="font-size:13px;">{{ ev.title }}</strong><br>
                             <span style="font-size:11px; color:var(--text-2);">
-                                📅 {{ ev.date.strftime('%d/%m/%Y') }}{% if ev.time %} - {{ ev.time }}{% endif %}
-                                {% set uf = uf_por_cidade(ev.location) %}
-                                {% if ev.location and ev.country %}
-                                    · 📍 {{ ev.location }}{% if uf %} ({{ uf }}){% endif %}, {{ ev.country }}
-                                {% elif ev.location %}
-                                    · 📍 {{ ev.location }}{% if uf %} ({{ uf }}){% endif %}
-                                {% elif ev.country %}
-                                    · 📍 {{ ev.country }}
-                                {% endif %}
+                                {{ ev.date.strftime('%d/%m/%Y') }} {% if ev.time %} - {{ ev.time }}{% endif %}
                             </span><br>
+                            {% if ev.location and ev.country %}
+                                <span style="font-size:10px; color:var(--text-3);">📍 {{ ev.location }}, {{ ev.country }}</span>
+                            {% elif ev.location %}
+                                <span style="font-size:10px; color:var(--text-3);">📍 {{ ev.location }}</span>
+                            {% elif ev.country %}
+                                <span style="font-size:10px; color:var(--text-3);">📍 {{ ev.country }}</span>
+                            {% endif %}
                             {% if ev.event_type %}<span class="badge" style="font-size:9px;">{{ ev.event_type }}</span>{% endif %}
                         </a>
                         <!-- Links copiáveis -->
@@ -2282,53 +2253,36 @@ def create_templates():
                                 </div>
                             {% endif %}
                             <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
-                                <span style="font-size:11px;">📋</span>
-                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id) }}" style="font-size:11px;">Palestras do Evento</a>
-                            </div>
-                            <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                                 <span style="font-size:11px;">🧳</span>
                                 <a href="{{ url_for('event_register_self', event_id=ev.id) }}" style="font-size:11px;">Inscrever-me neste evento</a>
-                                <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, view_event=(None if view_event == ev.id else ev.id)) }}"
-                                   style="font-size:11px; margin-left:4px;" title="Ver quem está inscrito">👁️ ({{ ev.registrations|length }})</a>
+                                <a href="javascript:void(0);" onclick="document.getElementById('modal-content').innerHTML = document.getElementById('event-regs-{{ ev.id }}').innerHTML; document.getElementById('event-modal').style.display='flex';"
+                                   style="font-size:11px; margin-left:4px; cursor:pointer;" title="Ver quem está inscrito">👁️ ({{ ev.registrations|length }})</a>
                             </div>
-                            {% if view_event == ev.id %}
-                                <div style="margin-top:6px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
-                                    <strong style="color:var(--blue); font-size:12px;">👥 Inscritos:</strong>
-                                    <ul style="list-style:none; margin:4px 0 0 0; padding:0; font-size:12px;">
-                                        {% for reg in ev.registrations %}
-                                            <li style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
-                                                <span>
-                                                    {{ reg.user.name }}{% if reg.hotel_name %} — 🏨 {{ reg.hotel_name }}{% endif %}
-                                                    {% if reg.user_id == current_user.id %}<span style="color:var(--blue); font-size:10px;">— você</span>{% endif %}
-                                                </span>
-                                                {% if current_user.is_admin() or reg.user_id == current_user.id %}
-                                                    <form method="post" action="{{ url_for('registration_delete', reg_id=reg.id) }}" onsubmit="return confirm('{{ 'Cancelar sua inscrição neste evento?' if reg.user_id == current_user.id else 'Remover ' + reg.user.name + ' deste evento?' }}');">
-                                                        <button type="submit" style="border:none; background:none; color:var(--text-3); cursor:pointer; font-size:11px;" title="Cancelar inscrição">❌</button>
-                                                    </form>
-                                                {% endif %}
-                                            </li>
-                                        {% else %}
-                                            <li style="color:var(--text-3);">Ninguém inscrito ainda.</li>
-                                        {% endfor %}
-                                    </ul>
-                                </div>
-                            {% endif %}
+                            <div id="event-regs-{{ ev.id }}" style="display:none;">
+                                <strong style="color:var(--blue); font-size:13px;">{{ ev.title }}</strong>
+                                <ul style="list-style:none; margin:4px 0 0 0; padding:0; font-size:12px;">
+                                    {% for reg in ev.registrations %}
+                                        <li style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
+                                            <span>
+                                                {{ reg.user.name }}{% if reg.hotel_name %} — 🏨 {{ reg.hotel_name }}{% endif %}
+                                                {% if reg.user_id == current_user.id %}<span style="color:var(--blue); font-size:10px;">— você</span>{% endif %}
+                                            </span>
+                                            {% if current_user.is_admin() or reg.user_id == current_user.id %}
+                                                <form method="post" action="{{ url_for('registration_delete', reg_id=reg.id) }}" onsubmit="return confirm('{{ 'Cancelar sua inscrição neste evento?' if reg.user_id == current_user.id else 'Remover ' + reg.user.name + ' deste evento?' }}');">
+                                                    <button type="submit" style="border:none; background:none; color:var(--text-3); cursor:pointer; font-size:11px;" title="Cancelar inscrição">❌</button>
+                                                </form>
+                                            {% endif %}
+                                        </li>
+                                    {% else %}
+                                        <li style="color:var(--text-3);">Ninguém inscrito ainda.</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
                         </div>
                         <!-- Exibe palestras se for o evento selecionado -->
-                        {% if selected_event_id == ev.id %}
+                        {% if selected_event_id == ev.id and talks %}
                             <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
-                                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
-                                    <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
-                                    {% if current_user.is_admin() %}
-                                        <a href="{{ url_for('event_talks', event_id=ev.id) }}" class="btn btn-primary btn-sm" style="padding:3px 10px; font-size:11px; font-weight:700;">+ Cadastrar Palestra</a>
-                                    {% endif %}
-                                </div>
-                                {% if not talks %}
-                                    <p style="font-size:12px; color:var(--text-3); margin:6px 0 0 0;">
-                                        Nenhuma palestra cadastrada ainda para esse evento.
-                                        {% if ev.site %}<br><a href="{{ ev.site }}" target="_blank">Ver programação completa no site do evento →</a>{% endif %}
-                                    </p>
-                                {% endif %}
+                                <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
                                 {% for talk in talks %}
                                     <div class="talk-item">
                                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; flex-wrap:wrap;">
@@ -2343,11 +2297,6 @@ def create_templates():
                                                    title="Inscrever-se nessa palestra" style="font-size:14px; text-decoration:none;">➕👤</a>
                                                 <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id, view_talk=(None if view_talk == talk.id else talk.id), register_talk=register_talk) }}"
                                                    title="Ver quem já está inscrito" style="font-size:14px; text-decoration:none;">👁️ <span style="font-size:10px; color:var(--text-3);">({{ talk_reg_counts.get(talk.id, 0) }})</span></a>
-                                                {% if current_user.is_admin() %}
-                                                    <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');" style="display:inline;">
-                                                        <button type="submit" title="Excluir palestra" style="border:none; background:none; cursor:pointer; font-size:14px;">🗑️</button>
-                                                    </form>
-                                                {% endif %}
                                             </div>
                                         </div>
 
@@ -2636,34 +2585,16 @@ def create_templates():
     <div class="card-body">
         {% if talks %}
             {% for talk in talks %}
-                <div class="talk-item">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-                        <div>
-                            <span class="talk-time">{{ talk.time }}</span>
-                            <strong>{{ talk.title }}</strong>
-                            {% if talk.speaker %}<span style="font-size:12px; color:var(--text-2);"> - {{ talk.speaker }}</span>{% endif %}
-                            <div style="font-size:12px; color:var(--text-3);">{{ talk.description }}</div>
-                        </div>
-                        <div class="flex gap-8" style="flex-shrink:0;">
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-talk-{{ talk.id }}').style.display = document.getElementById('edit-talk-{{ talk.id }}').style.display === 'none' ? 'block' : 'none';">Editar</button>
-                            <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');">
-                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
-                            </form>
-                        </div>
+                <div class="talk-item" style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+                    <div>
+                        <span class="talk-time">{{ talk.time }}</span>
+                        <strong>{{ talk.title }}</strong>
+                        {% if talk.speaker %}<span style="font-size:12px; color:var(--text-2);"> - {{ talk.speaker }}</span>{% endif %}
+                        <div style="font-size:12px; color:var(--text-3);">{{ talk.description }}</div>
                     </div>
-                    <div id="edit-talk-{{ talk.id }}" style="display:none; margin-top:10px; padding:10px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
-                        <form method="post" action="{{ url_for('event_talk_edit', talk_id=talk.id) }}">
-                            <div class="form-group"><label>Título</label><input type="text" name="title" class="form-control" value="{{ talk.title }}" required></div>
-                            <div class="form-row">
-                                <div class="form-group"><label>Palestrante</label><input type="text" name="speaker" class="form-control" value="{{ talk.speaker or '' }}"></div>
-                                <div class="form-group"><label>Horário</label><input type="text" name="time" class="form-control" value="{{ talk.time or '' }}" placeholder="Ex: 14:00"></div>
-                            </div>
-                            <div class="form-group"><label>Descrição</label><textarea name="description" class="form-control" rows="2">{{ talk.description or '' }}</textarea></div>
-                            <div class="flex" style="justify-content:flex-end;">
-                                <button type="submit" class="btn btn-primary btn-sm">Salvar alterações</button>
-                            </div>
-                        </form>
-                    </div>
+                    <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');">
+                        <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                    </form>
                 </div>
             {% endfor %}
         {% else %}
