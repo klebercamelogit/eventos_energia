@@ -1281,7 +1281,7 @@ def event_talk_delete(talk_id):
     db.session.delete(talk)
     db.session.commit()
     flash('🗑️ Palestra removida.', 'success')
-    return redirect(url_for('event_talks', event_id=event_id))
+    return redirect(request.referrer or url_for('event_talks', event_id=event_id))
 
 
 
@@ -2308,13 +2308,15 @@ def create_templates():
                         <!-- Exibe palestras se for o evento selecionado -->
                         {% if selected_event_id == ev.id %}
                             <div style="margin-top:8px; padding:8px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--border);">
-                                <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
+                                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                                    <strong style="font-size:12px; color:var(--blue);">📋 Palestras:</strong>
+                                    {% if current_user.is_admin() %}
+                                        <a href="{{ url_for('event_talks', event_id=ev.id) }}" class="btn btn-primary btn-sm" style="padding:3px 10px; font-size:11px; font-weight:700;">+ Cadastrar Palestra</a>
+                                    {% endif %}
+                                </div>
                                 {% if not talks %}
                                     <p style="font-size:12px; color:var(--text-3); margin:6px 0 0 0;">
                                         Nenhuma palestra cadastrada ainda para esse evento.
-                                        {% if current_user.is_admin() %}
-                                            <br><a href="{{ url_for('event_talks', event_id=ev.id) }}">+ Cadastrar palestra</a>
-                                        {% endif %}
                                         {% if ev.site %}<br><a href="{{ ev.site }}" target="_blank">Ver programação completa no site do evento →</a>{% endif %}
                                     </p>
                                 {% endif %}
@@ -2332,6 +2334,11 @@ def create_templates():
                                                    title="Inscrever-se nessa palestra" style="font-size:14px; text-decoration:none;">➕👤</a>
                                                 <a href="{{ url_for('dashboard', list_year=list_year, list_month=list_month, list_country=list_country, list_has_reg=list_has_reg, list_scope=list_scope, list_uf=list_uf, event_id=ev.id, view_talk=(None if view_talk == talk.id else talk.id), register_talk=register_talk) }}"
                                                    title="Ver quem já está inscrito" style="font-size:14px; text-decoration:none;">👁️ <span style="font-size:10px; color:var(--text-3);">({{ talk_reg_counts.get(talk.id, 0) }})</span></a>
+                                                {% if current_user.is_admin() %}
+                                                    <form method="post" action="{{ url_for('event_talk_delete', talk_id=talk.id) }}" onsubmit="return confirm('Remover essa palestra? As inscrições nela também serão removidas.');" style="display:inline;">
+                                                        <button type="submit" title="Excluir palestra" style="border:none; background:none; cursor:pointer; font-size:14px;">🗑️</button>
+                                                    </form>
+                                                {% endif %}
                                             </div>
                                         </div>
 
